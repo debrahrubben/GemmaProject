@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Improved Gemma LLM Inference Web Demo</title>
+  <style>
+    /* Simple CSS for better readability */
+    body { font-family: sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; }
+    textarea {
+      width: 100%;
+      box-sizing: border-box; /* Include padding and border in the element's total width and height */
+      margin-bottom: 10px;
+    }
+    #input { height: 150px; }
+    #output { height: 200px; background-color: #f7f7f7; }
+    #submit { padding: 10px 20px; font-weight: bold; }
+  </style>
+</head>
+<body>
+  <h2>Gemma Inference Demo</h2>
+  <p>Input Prompt:</p>
+  <textarea id="input" placeholder="Type your prompt here..."></textarea>
+  <button id="submit" disabled>Loading Model...</button>
+  <p>Result (Streaming):</p>
+  <textarea id="output" readonly placeholder="Response will appear here in real-time."></textarea>
+  <p id="status-message" style="color: grey;"></p>
+
+  <script type="module">
+    import { FilesetResolver, LlmInference } 
+      from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-genai";
+
+    // --- Configuration ---
+    const MODEL_ASSET_PATH = "assets/gemma-3n-E4B-it-int4-Web.litertlm";
+    const WASM_PATH = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-genai/wasm";
+    // --- UI Elements ---
+    const inputEl = document.getElementById("input");
+    const outputEl = document.getElementById("output");
+    const submitButton = document.getElementById("submit");
+    const statusEl = document.getElementById("status-message");
+
+    let llmInference = null;
+    let isGenerating = false;
+
+    /**
+     * Updates the output textarea with partial results during streaming.
+     */
+    function displayPartialResults(partialResults, complete) {
+      outputEl.value += partialResults;
+
+      if (complete) {
+        isGenerating = false;
+        submitButton.disabled = false;
+        submitButton.textContent = "Get Response";
+        statusEl.textContent = `Generation complete. Total characters: ${outputEl.value.length}`;
+      }
+    }
+
+    /**
+     * Initializes the Gemma model using MediaPipe Tasks GenAI.
+     */
+    async function initGemma() {
+      statusEl.textContent = "Loading WebAssembly backend...";
+      try {
+        // 1. Load WASM backend
+        const genai = await FilesetResolver.forGenAiTasks(WASM_PATH);
+        statusEl.textContent = `WebAssembly loaded. Initializing model: ${MODEL_ASSET_PATH}...`;
+
+        // 2. Create inference instance with model options
+        llmInference = await LlmInference.createFromOptions(genai, {
+          baseOptions: {
+            modelAssetPath: MODEL_ASSET_PATH
+          },
+          // Optional generation parameters
+          maxTokens: 512, 
+          temperature: 0.8,
+          topK: 40,
+          randomSeed: 101 // Setting a seed makes results deterministic
+        });
+
+        // 3. Update UI on success
+        submitButton.disabled = false;
+        submitButton.textContent = "Get Response";
+        statusEl.textContent = "✅ Gemma initialized successfully. Enter a prompt and click 'Get Response'.";
+      } catch (err) {
+        // 4. Handle initialization errors
+        console.error("Failed to initialize Gemma:", err);
+        submitButton.textContent = "Initialization Failed";
+        statusEl.textContent = `❌ Initialization failed! Check console for details. Error: ${err.message}`;
+      }
+    }
+
+    /**
+     * Runs the LLM inference when the button is clicked.
+     */
+    submitButton.onclick = async () => {
+      if (!llmInference || isGenerating) return;
+
+      // Clear previous results and update UI
+      isGenerating = true;
+      outputEl.value = "";
+      submitButton.disabled = true;
+      submitButton.textContent = "Generating...";
+      statusEl.textContent = "Generating response. Please wait...";
+
+      try {
+        // Use the streaming API for real-time output
+        await llmInference.generateResponse(inputEl.value, displayPartialResults);
+      } catch (err) {
+        console.error("Generation Error:", err);
+        outputEl.value = `ERROR: Failed to generate response. ${err.message}`;
+        
+        // Ensure UI state is reset even on error
+        isGenerating = false;
+        submitButton.disabled = false;
+        submitButton.textContent = "Get Response";
+        statusEl.textContent = `❌ Generation failed: ${err.message}`;
+      }
+    };
+
+    // Start the initialization process
+    initGemma();
+  </script>
+</body>
+</html>
